@@ -1,0 +1,11 @@
+/.DS_Store
+/.env
+/.requirements.zip
+/.serverless
+/.vscode
+/BK
+/__pycache__
+/bin
+/node_modules
+/package-lock.json
+/venv

@@ -1,0 +1,53 @@
+# "org" ensures this Service is used with the correct Serverless Framework Access Key.
+org: atueda
+# "app" enables Serverless Framework Dashboard features and sharing them with other Services.
+app: lamda-example-python-2
+# この名前は自由です
+service: lamda-example-python-2
+provider:
+  name: aws
+  # 利用可能なバージョンは https://docs.aws.amazon.com/lambda/latest/dg/lambda-python.html を確認してください
+  runtime: python3.11
+  # リージョンは普段使うものに変更
+  region: us-east-1
+  iam:
+    role:
+      statements:
+        # Lazy Listeners を利用するために必要
+        - Effect: Allow
+          Action:
+            - lambda:InvokeFunction
+            - lambda:InvokeAsync
+          Resource: "*"
+        # 他にも必要なものがあれば追記してください
+  environment:
+    SERVERLESS_STAGE: ${opt:stage, 'prod'}
+    # デプロイを実行する前に export しておいてください
+    SLACK_SIGNING_SECRET: ${env:SLACK_SIGNING_SECRET}
+    SLACK_BOT_TOKEN: ${env:SLACK_BOT_TOKEN}
+
+# エンドポイント一覧を設定
+# OAuth フローを設定する場合は他に二つ追加します
+functions:
+  app:
+    handler: app.handler
+    events:
+      - httpApi:
+          path: /slack/events
+          method: post
+
+# アップロードに含めたくないファイルは ! はじまりで列挙します
+package:
+  patterns:
+    - "!.venv/**"
+    - "!node_modules/**"
+    - "!.idea/**"
+    - "!BK/**"
+
+# プラグインを使って依存ライブラリを zip 圧縮します
+plugins:
+  - serverless-python-requirements
+custom:
+  pythonRequirements:
+    zip: true
+    slim: true

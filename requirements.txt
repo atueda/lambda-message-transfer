@@ -1,0 +1,4 @@
+slack-bolt>=1.15.5,<2
+requests
+# weasyprint
+# cffi

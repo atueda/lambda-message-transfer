@@ -1,0 +1,43 @@
+display_information:
+  name: lamda message transfer
+features:
+  app_home:
+    home_tab_enabled: true
+    messages_tab_enabled: false
+    messages_tab_read_only_enabled: true
+  bot_user:
+    display_name: lamda message transfer
+    always_online: true
+  shortcuts:
+    - name: メッセージを保存
+      type: message
+      callback_id: message_save
+      description: メッセージを保存します
+    - name: Run AWS Lambda App2
+      type: global
+      callback_id: run-aws-lambda-app
+      description: Run AWS Lambda App
+oauth_config:
+  scopes:
+    bot:
+      - channels:history
+      - chat:write
+      - commands
+      - files:read
+      - files:write
+      - groups:history
+      - im:history
+      - mpim:history
+      - users:read
+      - reactions:write
+settings:
+  event_subscriptions:
+    request_url: https://qkw2zjyhk8.execute-api.us-east-1.amazonaws.com/slack/events
+    bot_events:
+      - app_home_opened
+  interactivity:
+    is_enabled: true
+    request_url: https://qkw2zjyhk8.execute-api.us-east-1.amazonaws.com/slack/events
+  org_deploy_enabled: true
+  socket_mode_enabled: false
+  token_rotation_enabled: false
