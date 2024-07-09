@@ -11,9 +11,9 @@ import requests
 from slack_bolt import App, Ack
 from slack_sdk.web import WebClient
 from datetime import datetime
-#from weasyprint import HTML  # WeasyPrintのインポート
-#import pdf
+import boto3
 
+# ロギング設定
 logger = logging.getLogger()
 logger.setLevel("INFO")
 
@@ -25,20 +25,18 @@ logging.basicConfig(level=logging.DEBUG)
 client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
 
 app = App(
-    # リクエストの検証に必要な値
-    # Settings > Basic Information > App Credentials > Signing Secret で取得可能な値
     signing_secret=os.environ["SLACK_SIGNING_SECRET"],
-    # 上でインストールしたときに発行されたアクセストークン
-    # Settings > Install App で取得可能な値
     token=os.environ["SLACK_BOT_TOKEN"],
-    # AWS Lamdba では、必ずこの設定を true にしておく必要があります
     process_before_response=True,
 )
 
-channel=os.environ["CHANNEL"]
+channel = os.environ["CHANNEL"]
+
+# S3クライアントのセットアップ
+s3_client = boto3.client('s3')
+bucket_name = os.environ["S3_BUCKET_NAME"]
 
 # グローバルショットの関数
-# lazy に指定された関数は別の AWS Lambda 実行として非同期で実行されます
 def just_ack(ack: Ack):
     ack()
 
@@ -56,7 +54,6 @@ def get_files_from_messages(messages):
 
 # グローバルショットの処理
 def start_modal_interaction(body: dict, client: WebClient):
-    # 入力項目ひとつだけのシンプルなモーダルを開く
     client.views_open(
         trigger_id=body["trigger_id"],
         view={
@@ -137,28 +134,21 @@ def message_shortcut(ack, shortcut, client, body):
             content += f"スレッド:\n{thread_text}"
         
         logger.info('## OK4')
+
+        # テキストコンテンツをS3に保存
+        s3_key = f"messages/{channel_id}/{message_ts}.txt"
+        s3_client.put_object(Bucket=bucket_name, Key=s3_key, Body=content)
         
-        # PDFを生成
-        # pdf_file_path = "message.pdf"
-        # HTML(string=content).write_pdf(pdf_file_path)  # WeasyPrintでPDFを生成
-        # logger.info("File Create")
-        
-        # 新しいメッセージを別のチャンネルに投稿し、そのスレッドにPDFを添付
+        logger.info('## OK5')
+
+        # 新しいメッセージを別のチャンネルに投稿
         new_message = client.chat_postMessage(
             channel=channel,
             text=content
         )
         new_thread_ts = new_message["ts"]
-        # client.files_upload_v2(
-        #     channels=channel,
-        #     file=pdf_file_path,
-        #     title="Message and Thread PDF",
-        #     initial_comment="Here is the PDF containing the message and its thread.",
-        #     thread_ts=new_thread_ts
-        # )
-        logger.info('## OK5')
-        
-        # 元のメッセージとスレッド内のファイルを新しいメッセージのスレッドに添の
+
+        # 元のメッセージとスレッド内のファイルを新しいメッセージのスレッドに添付
         all_files = message_files + (thread_files if thread_ts else [])
         for file in all_files:
             file_id = file["id"]
@@ -167,14 +157,20 @@ def message_shortcut(ack, shortcut, client, body):
             file_url = file_info["file"]["url_private"]
             response = requests.get(file_url, headers={"Authorization": f"Bearer {os.environ.get('SLACK_BOT_TOKEN')}"})
             file_content = response.content
-            response = client.files_upload_v2(
+
+            # ファイルをS3に保存
+            s3_file_key = f"files/{file_id}/{file_name}"
+            s3_client.put_object(Bucket=bucket_name, Key=s3_file_key, Body=file_content)
+            logger.info(f"Uploaded file to S3: {s3_file_key}")
+
+            # Slackにファイルをアップロード
+            client.files_upload_v2(
                 channels=channel,
                 file=file_content,
                 filename=file_name,
                 thread_ts=new_thread_ts
             )
-            logger.info(f"File upload response: {response}")
-    
+        
         logger.info('## OK6')
         
         # 元のスレッドにリアクションを追加
@@ -187,21 +183,13 @@ def message_shortcut(ack, shortcut, client, body):
     except Exception as e:
         logger.error(e)
 
-    
 # モーダルで送信ボタンが押されたときに呼び出される処理
-# このメソッドは 3 秒以内に終了しなければならない
 def handle_modal(ack: Ack):
-    # ack() は何も渡さず呼ぶとただ今のモーダルを閉じるだけ
-    # response_action とともに応のがダメでのがダメな
-    # エラーを表示したり、モーダルの内容を更新したりできる
-    # https://slack.dev/bolt-python/ja-jp/concepts#view_submissions
     ack()
 
-# モーダルで送信ボタンが押されたときに非のがダメな処理
-# モーダルの操作以外で時間のかかる処理があればこちらに書く
+# モーダルで送信ボタンが押されたときに非同期で処理される関数
 def handle_time_consuming_task(logger: logging.Logger, view: dict):
     logger.info(view)
-
 
 # @app.view のようなデコレーターでの登録ではなく
 # Lazy Listener としてメインの処理を設定します
@@ -221,20 +209,15 @@ app.shortcut("message_save")(
 )
 
 if __name__ == "__main__":
-    # python app.py のように実行すると開発用 Web サーバーで起動します
     app.start(3000)
     
-# これより以降は AWS Lambda 環境で実行したときのみ実行されます
-
+# AWS Lambda 環境で実行される関数
 from slack_bolt.adapter.aws_lambda import SlackRequestHandler
 
 # ロギングを AWS Lambda 向けに初期化します
 SlackRequestHandler.clear_all_log_handlers()
 logging.basicConfig(format="%(asctime)s %(message)s", level=logging.DEBUG)
 
-# AWS Lambda 環境で実行される関数
 def handler(event, context):
-    # AWS Lambda 環境のリクエスト情報を app が処理できるよう変換してくれるアダプター
     slack_handler = SlackRequestHandler(app=app)
-    # 応答はのがダメでのがダメのがダメなやり方を
     return slack_handler.handle(event, context)
